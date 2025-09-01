@@ -1,0 +1,13 @@
+# robot_config.yaml
+urdf_path: "rb3_730es_u.urdf"
+ee_link: "tcp"
+base_link: "link0"
+
+ik_params:
+  pos_tol: 1e-6
+  rot_tol: 1e-6
+  max_iters: 300
+  damping: 0.01
+  step_scale: 0.5
+  dq_max: 0.2
+  num_attempts: 15
