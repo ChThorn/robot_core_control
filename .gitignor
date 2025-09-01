@@ -1,0 +1,7 @@
+__pycache__/
+*.npy
+*.json
+*.txt
+*.png
+recorded_paths/
+*.urdf
