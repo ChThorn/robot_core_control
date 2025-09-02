@@ -230,25 +230,40 @@ class RealDataValidator:
         self.results['inverse_kinematics'] = results
         return results
     
-    def validate_consistency(self, num_samples: int = 20) -> Dict[str, Any]:
+    def validate_consistency(self, num_samples: int = 20, use_real_data: bool = False) -> Dict[str, Any]:
         """Test FK-IK consistency across the workspace."""
         print("\n" + "="*60)
         print("FK-IK CONSISTENCY VALIDATION")
         print("="*60)
         
-        # Generate test configurations across joint space
-        joint_limits = self.controller.robot.joint_limits
-        
         consistency_errors = []
         test_configs = []
         
-        print(f"Testing {num_samples} random configurations...")
-        
-        for i in range(num_samples):
-            # Generate random joint configuration
-            q_test = np.random.uniform(joint_limits[0], joint_limits[1])
-            test_configs.append(q_test)
+        if use_real_data:
+            # Use real robot waypoints for consistency testing
+            waypoints = self.data['waypoints']
+            if num_samples > len(waypoints):
+                num_samples = len(waypoints)
+            indices = np.linspace(0, len(waypoints)-1, num_samples, dtype=int)
             
+            print(f"Testing {num_samples} real robot waypoints for consistency...")
+            
+            for i, idx in enumerate(indices):
+                wp = waypoints[idx]
+                q_deg = np.array(wp['joint_positions'])
+                q_test = np.deg2rad(q_deg)
+                test_configs.append(q_test)
+        else:
+            # Generate test configurations across joint space
+            joint_limits = self.controller.robot.joint_limits
+            print(f"Testing {num_samples} random configurations...")
+            
+            for i in range(num_samples):
+                # Generate random joint configuration
+                q_test = np.random.uniform(joint_limits[0], joint_limits[1])
+                test_configs.append(q_test)
+        
+        for i, q_test in enumerate(test_configs):
             try:
                 # FK: q -> T
                 T_fk = self.controller.forward_kinematics(q_test)
@@ -271,7 +286,10 @@ class RealDataValidator:
                     
                     if i < 3:  # Show first 3 in detail
                         print(f"Test {i+1}:")
-                        print(f"  Original q (deg): {np.round(np.rad2deg(q_test), 2)}")
+                        if use_real_data:
+                            print(f"  Real waypoint joints (deg): {np.round(np.rad2deg(q_test), 2)}")
+                        else:
+                            print(f"  Original q (deg): {np.round(np.rad2deg(q_test), 2)}")
                         print(f"  IK solution (deg): {np.round(np.rad2deg(q_ik), 2)}")
                         print(f"  Position consistency: {pos_err*1e6:.1f} μm")
                         print(f"  Rotation consistency: {np.rad2deg(rot_err)*3600:.1f} arcsec")
@@ -418,14 +436,14 @@ def main():
     # Run validation tests
     print("Starting comprehensive validation...")
     
-    # Test 1: Forward Kinematics
-    validator.validate_forward_kinematics(num_samples=20)
+    # Test 1: Forward Kinematics - Use ALL 38 waypoints
+    validator.validate_forward_kinematics(num_samples=None)
     
-    # Test 2: Inverse Kinematics
-    validator.validate_inverse_kinematics(num_samples=10)
+    # Test 2: Inverse Kinematics - Use ALL 38 waypoints  
+    validator.validate_inverse_kinematics(num_samples=38)
     
-    # Test 3: Consistency
-    validator.validate_consistency(num_samples=15)
+    # Test 3: Consistency - Use real robot waypoints for consistency validation
+    validator.validate_consistency(num_samples=20, use_real_data=True)
     
     # Generate and save report
     validator.save_report("kinematics_validation_report.txt")
