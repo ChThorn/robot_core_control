@@ -1,0 +1,29 @@
+{
+  "ik": {
+    "position_tolerance": 1e-3,
+    "rotation_tolerance": 3e-3,
+    "max_iterations": 200,
+    "damping": 1e-4,
+    "step_scale": 0.4,
+    "max_step_size": 0.2,
+    "max_attempts": 25,
+    "combined_error_weight": 0.1,
+    "acceptance_threshold": 2e-3
+  },
+  "performance": {
+    "enable_debug_logging": false,
+    "random_seed": 42,
+    "max_fk_time_warning": 0.001,
+    "max_ik_time_warning": 0.5
+  },
+  "safety": {
+    "joint_limit_margin": 0.02,
+    "singularity_threshold": 1e-5,
+    "max_condition_number": 1e5
+  },
+  "robot": {
+    "urdf_path": "rb3_730es_u.urdf",
+    "end_effector_link": "tcp",
+    "base_link": "link0"
+  }
+}

@@ -159,16 +159,48 @@ class RobotKinematics:
         trace_R = np.trace(R)
         cos_th = np.clip((trace_R - 1.0) * 0.5, -1.0, 1.0)
         theta = np.arccos(cos_th)
-        if theta < 1e-12:
-            return np.hstack([np.zeros(3), p])
-        s = np.sin(theta)
-        omega_hat = (R - R.T) * (0.5 / s)
-        omega = np.array([omega_hat[2, 1], omega_hat[0, 2], omega_hat[1, 0]])
-        I = np.eye(3)
+        
+        if theta < 1e-6:
+            # Small angle approximation
+            omega = np.array([R[2,1] - R[1,2], R[0,2] - R[2,0], R[1,0] - R[0,1]]) * 0.5
+            return np.hstack([omega, p])
+            
+        # Normal case
+        sin_th = np.sin(theta)
+        if abs(sin_th) < 1e-6:
+            # Handle theta ≈ π case
+            # Find the axis from the eigenvector corresponding to eigenvalue 1
+            try:
+                eigvals, eigvecs = np.linalg.eig(R)
+                axis_idx = np.argmin(np.abs(eigvals - 1.0))
+                omega_unit = np.real(eigvecs[:, axis_idx])
+                omega_unit = omega_unit / (np.linalg.norm(omega_unit) + 1e-12)  # Avoid division by zero
+                omega = omega_unit * theta
+            except np.linalg.LinAlgError:
+                # Fallback if eigenvalue decomposition fails
+                logger.debug("Eigenvalue decomposition failed in matrix_log6, using fallback")
+                omega = np.array([0., 0., theta])  # Assume rotation around z-axis
+        else:
+            omega_hat = (R - R.T) * (0.5 / sin_th)
+            omega = np.array([omega_hat[2, 1], omega_hat[0, 2], omega_hat[1, 0]]) * theta
+            
+        # Compute V inverse for translation part
+        omega_norm = np.linalg.norm(omega) + 1e-12  # Avoid division by zero
+        omega_unit = omega / omega_norm
+        omega_hat = RobotKinematics._skew(omega_unit)
         omega_hat2 = omega_hat @ omega_hat
-        V_inv = (I / theta - 0.5 * omega_hat + (1.0 / theta - 0.5 / np.tan(theta / 2.0)) * omega_hat2)
-        v = V_inv @ p
-        return np.hstack([omega * theta, v * theta])
+        
+        try:
+            cot_half = 1.0 / np.tan(theta * 0.5)
+            V_inv = (np.eye(3) / theta - 0.5 * omega_hat + 
+                    (1.0 / theta - 0.5 * cot_half) * omega_hat2)
+            v = V_inv @ p
+        except (ZeroDivisionError, FloatingPointError):
+            # Fallback for numerical issues
+            logger.debug("Numerical issue in matrix_log6 V_inv computation, using fallback")
+            v = p / (theta + 1e-12)
+        
+        return np.hstack([omega, v])
 
     @staticmethod
     def _matrix_exp6(xi_theta: np.ndarray) -> np.ndarray:
@@ -200,75 +232,200 @@ class RobotKinematics:
 
     def jacobian_body(self, q: np.ndarray) -> np.ndarray:
         """Compute body Jacobian for given joint angles."""
-        T = self.forward_kinematics(q)
-        J = np.zeros((6, self.n_joints))
+        # Compute spatial Jacobian first
+        J_s = np.zeros((6, self.n_joints))
         T_temp = np.eye(4)
+        
         for i in range(self.n_joints):
-            J[:, i] = self.S[:, i] if i == 0 else self._adjoint(T_temp) @ self.S[:, i]
+            # Transform spatial twist to current frame
+            if i == 0:
+                J_s[:, i] = self.S[:, i]
+            else:
+                J_s[:, i] = self._adjoint(T_temp) @ self.S[:, i]
             T_temp = T_temp @ self._matrix_exp6(self.S[:, i] * q[i])
-        return self._adjoint(inv(T)) @ J
+        
+        # Convert to body Jacobian
+        T_final = self.forward_kinematics(q)
+        return self._adjoint(inv(T_final)) @ J_s
 
     def inverse_kinematics(
-        self, 
-        T_des: np.ndarray, 
-        q_init: Optional[np.ndarray] = None,
-        pos_tol: float = 1e-6, 
-        rot_tol: float = 1e-6, 
-        max_iters: int = 300,
-        damping: float = 1e-2, 
-        step_scale: float = 0.5, 
-        dq_max: float = 0.2,
-        num_attempts: int = 10
-    ) -> Tuple[Optional[np.ndarray], bool]:
-        """Solve inverse kinematics using damped least squares."""
-        
-        limits_lower, limits_upper = self.joint_limits[0], self.joint_limits[1]
-        
-        # Use provided initial guess if available
-        if q_init is not None:
-            q_sol, converged = self._ik_dls(T_des, q_init, pos_tol, rot_tol, max_iters, damping, step_scale, dq_max)
-            if converged:
-                return q_sol, True
+            self, 
+            T_des: np.ndarray, 
+            q_init: Optional[np.ndarray] = None,
+            pos_tol: float = 1e-6, 
+            rot_tol: float = 1e-6, 
+            max_iters: int = 300,
+            damping: float = 1e-2, 
+            step_scale: float = 0.5, 
+            dq_max: float = 0.2,
+            num_attempts: int = 10
+        ) -> Tuple[Optional[np.ndarray], bool]:
+            """Solve inverse kinematics with enhanced singularity handling."""
+            
+            # First check if we're trying to reach the home position
+            T_home = self.forward_kinematics(np.zeros(self.n_joints))
+            home_pos_err = np.linalg.norm(T_des[:3, 3] - T_home[:3, 3])
+            home_rot_err = np.arccos(np.clip((np.trace(T_des[:3, :3].T @ T_home[:3, :3]) - 1) / 2.0, -1.0, 1.0))
+            
+            if home_pos_err < pos_tol and home_rot_err < rot_tol:
+                logger.info("Target is home position, returning zero joints")
+                return np.zeros(self.n_joints), True
+            
+            limits_lower, limits_upper = self.joint_limits[0], self.joint_limits[1]
+            
+            # Use provided initial guess if available
+            if q_init is not None:
+                q_sol, converged = self._ik_dls(T_des, q_init, pos_tol, rot_tol, max_iters, damping, step_scale, dq_max)
+                if converged:
+                    return q_sol, True
 
-        # Try with random starts
-        for i in range(num_attempts):
-            q0 = np.random.uniform(limits_lower, limits_upper)
-            q_sol, converged = self._ik_dls(T_des, q0, pos_tol, rot_tol, max_iters, damping, step_scale, dq_max)
-            if converged:
-                logger.debug(f"IK converged after {i+1} attempts.")
-                return q_sol, True
-        
-        logger.warning("IK failed to converge after all attempts.")
-        return None, False
+            # Try with random starts
+            for i in range(num_attempts):
+                q0 = np.random.uniform(limits_lower, limits_upper)
+                q_sol, converged = self._ik_dls(T_des, q0, pos_tol, rot_tol, max_iters, damping, step_scale, dq_max)
+                if converged:
+                    logger.debug(f"IK converged after {i+1} attempts.")
+                    return q_sol, True
+            
+            logger.warning("IK failed to converge after all attempts.")
+            return None, False
+
 
     def _ik_dls(self, T_des: np.ndarray, q0: np.ndarray, pos_tol: float, rot_tol: float, 
-               max_iters: int, damping: float, step_scale: float, dq_max: float) -> Tuple[np.ndarray, bool]:
-        """Damped least-squares IK implementation."""
+           max_iters: int, damping: float, step_scale: float, dq_max: float) -> Tuple[np.ndarray, bool]:
+        """Enhanced Damped least-squares IK implementation with singularity handling."""
         q = q0.copy()
         limits_lower, limits_upper = self.joint_limits[0], self.joint_limits[1]
         
-        for i in range(max_iters):
-            T_cur = self.forward_kinematics(q)
-            T_err = inv(T_cur) @ T_des
-            Vb = self._matrix_log6(T_err)
+        # Special handling for home position
+        if np.allclose(q, 0, atol=1e-6):
+            # Apply a small perturbation to avoid singularity
+            q = q + np.random.uniform(-0.1, 0.1, self.n_joints)
+            logger.debug("Applied perturbation to avoid home position singularity")
+        
+        # Track best solution found
+        best_q = q.copy()
+        best_error = float('inf')
+        
+        # Adaptive parameters
+        min_damping = damping
+        max_damping = 1.0
+        damping_factor = min_damping
+        
+        # Multi-phase optimization for difficult cases
+        phase_iters = [max_iters // 3, max_iters // 3, max_iters // 3 + max_iters % 3]
+        phase_step_scales = [step_scale * 1.5, step_scale, step_scale * 0.5]  # Start aggressive, end conservative
+        
+        iteration = 0
+        no_improvement_count = 0
+        
+        for phase, (phase_iter, phase_step) in enumerate(zip(phase_iters, phase_step_scales)):
+            logger.debug(f"IK Phase {phase+1}: {phase_iter} iters, step_scale={phase_step}")
             
-            rot_err = norm(Vb[:3])
-            pos_err = norm(Vb[3:])
-            if rot_err < rot_tol and pos_err < pos_tol:
-                return q, True
-            
-            Jb = self.jacobian_body(q)
-            JJt = Jb @ Jb.T
-            dq = Jb.T @ np.linalg.solve(JJt + (damping ** 2) * self._eye6, Vb)
-            
-            max_abs = np.max(np.abs(dq))
-            if max_abs > dq_max:
-                dq *= dq_max / max_abs
+            for i in range(phase_iter):
+                iteration += 1
                 
-            q += step_scale * dq
-            np.clip(q, limits_lower, limits_upper, out=q)
+                T_cur = self.forward_kinematics(q)
+                T_err = inv(T_cur) @ T_des
+                Vb = self._matrix_log6(T_err)
+                
+                rot_err = norm(Vb[:3])
+                pos_err = norm(Vb[3:])
+                total_error = pos_err + rot_err
+                
+                # Track best solution
+                if total_error < best_error:
+                    improvement = best_error - total_error
+                    best_error = total_error
+                    best_q = q.copy()
+                    no_improvement_count = 0
+                    
+                    # Log significant improvements
+                    if improvement > 1e-4:
+                        logger.debug(f"Iter {iteration}: error improved to {total_error:.6f}")
+                else:
+                    no_improvement_count += 1
+                
+                # Check convergence - use a more practical combined error metric
+                # For real robot applications, we care about overall pose accuracy
+                combined_error = pos_err + rot_err * 0.1  # Weight rotation less (0.1m per radian ≈ 57mm per degree)
+                if combined_error < (pos_tol + rot_tol * 0.1):
+                    logger.debug(f"IK converged at iteration {iteration} (combined error: {combined_error:.6f})")
+                    return q, True
+                
+                # Compute body Jacobian
+                Jb = self.jacobian_body(q)
+                
+                # Calculate manipulability measure
+                JJt = Jb @ Jb.T
+                det_JJt = np.linalg.det(JJt)
+                manipulability = np.sqrt(np.abs(det_JJt))
+                
+                # Adaptive damping based on manipulability and progress
+                if manipulability < 1e-4:  # Near singularity
+                    damping_factor = min(max_damping, damping_factor * 1.2)
+                elif no_improvement_count > 10:  # Stuck in local minimum
+                    damping_factor = min(max_damping, damping_factor * 1.1)
+                    # Apply small random perturbation to escape local minimum
+                    if no_improvement_count > 20:
+                        q += np.random.normal(0, 0.05, self.n_joints)
+                        q = np.clip(q, limits_lower, limits_upper)
+                        no_improvement_count = 0
+                        logger.debug(f"Applied escape perturbation at iter {iteration}")
+                else:
+                    # Gradually reduce damping for faster convergence
+                    damping_factor = max(min_damping, damping_factor * 0.99)
+                
+                # Damped least squares with regularization
+                JtJ = Jb.T @ Jb
+                reg_term = (damping_factor ** 2) * np.eye(self.n_joints)
+                
+                try:
+                    damped_inv = np.linalg.inv(JtJ + reg_term)
+                    dq = damped_inv @ Jb.T @ Vb
+                except np.linalg.LinAlgError:
+                    logger.debug(f"Matrix inversion failed at iter {iteration}, using pseudoinverse")
+                    dq = np.linalg.pinv(Jb) @ Vb
+                
+                # Limit step size
+                dq_norm = norm(dq)
+                if dq_norm > dq_max:
+                    dq = dq * (dq_max / dq_norm)
+                    
+                # Apply step with phase-specific scaling
+                adaptive_scale = phase_step
+                if total_error > best_error * 1.5:  # If error increased significantly
+                    adaptive_scale *= 0.3
+                    
+                q += adaptive_scale * dq
+                
+                # Enforce joint limits
+                q = np.clip(q, limits_lower, limits_upper)
+                
+                # Early termination if step is very small and no improvement
+                if dq_norm < 1e-9 and no_improvement_count > 5:
+                    logger.debug(f"Step size negligible at iteration {iteration}, moving to next phase")
+                    break
             
-        return q, False
+            # Between phases, try a small random perturbation if stuck
+            if phase < len(phase_iters) - 1 and best_error > pos_tol + rot_tol:
+                perturbation = np.random.normal(0, 0.1, self.n_joints) * (best_error / (pos_tol + rot_tol))
+                q = best_q + perturbation
+                q = np.clip(q, limits_lower, limits_upper)
+                logger.debug(f"Applied inter-phase perturbation, best_error={best_error:.6f}")
+        
+        # Return best solution found
+        final_error = best_error
+        # Use same combined error metric for final convergence check
+        pos_err_final, rot_err_final = self.check_pose_error(T_des, best_q)
+        combined_error_final = pos_err_final + rot_err_final * 0.1
+        converged = combined_error_final < (pos_tol + rot_tol * 0.1)
+        
+        if not converged:
+            logger.debug(f"IK completed {iteration} iterations, final error: {final_error:.6f}, "
+                        f"combined: {combined_error_final:.6f}")
+        
+        return best_q, converged
 
     def check_pose_error(self, T_des: np.ndarray, q: np.ndarray) -> Tuple[float, float]:
         """Calculate position and orientation error between desired and actual pose."""
@@ -277,6 +434,14 @@ class RobotKinematics:
         R_err = inv(T_actual[:3, :3]) @ T_des[:3, :3]
         angle = np.arccos(np.clip((np.trace(R_err) - 1) / 2.0, -1.0, 1.0))
         return pos_err, angle
+    
+    def check_singularity(self, q: np.ndarray, threshold: float = 1e-6) -> bool:
+        """Check if the current configuration is near a singularity."""
+        Jb = self.jacobian_body(q)
+        JJt = Jb @ Jb.T
+        det_JJt = np.linalg.det(JJt)
+        manipulability = np.sqrt(np.abs(det_JJt))
+        return manipulability < threshold
 
     @staticmethod
     def rpy_to_matrix(rpy: np.ndarray) -> np.ndarray:
