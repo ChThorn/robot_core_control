@@ -2,22 +2,22 @@ ROBOT KINEMATICS VALIDATION REPORT
 ==================================================
 Data source: third_20250710_162459.json
 Robot model: rb3_730es_u.urdf
-Test date: 2025-09-02 15:40:33
+Test date: 2025-09-02 16:11:44
 
 FORWARD KINEMATICS VALIDATION:
   Waypoints tested: 20
   Mean position error: 1.660 mm
   Mean rotation error: 0.065°
-  Mean computation time: 0.08 ms
+  Mean computation time: 0.09 ms
   ✅ Position accuracy: EXCELLENT
   ✅ Rotation accuracy: EXCELLENT
 
 INVERSE KINEMATICS VALIDATION:
   Tests performed: 10
   Success rate: 100.0%
-  Mean position error: 202.2 μm
-  Mean rotation error: 3298.1 arcsec
-  Mean computation time: 120.1 ms
+  Mean position error: 189.6 μm
+  Mean rotation error: 3410.8 arcsec
+  Mean computation time: 117.1 ms
   ✅ Reliability: EXCELLENT
 
 OVERALL ASSESSMENT:
