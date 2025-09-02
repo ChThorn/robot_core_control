@@ -2,22 +2,39 @@
 import numpy as np
 from numpy.linalg import norm, inv
 import xml.etree.ElementTree as ET
-from typing import Tuple, Optional, Dict, Any
+from typing import Tuple, Optional, List
 
 class RobotKinematics:
     """Production-ready robot kinematics class using PoE formulation."""
     
     def __init__(self, urdf_path: str, ee_link: str = "tcp", base_link: str = "link0"):
+        """
+        Initialize robot kinematics from URDF.
+        
+        Args:
+            urdf_path: Path to URDF file
+            ee_link: End effector link name
+            base_link: Base link name
+        """
         self.urdf_path = urdf_path
         self.ee_link = ee_link
         self.base_link = base_link
         
+        # Load robot parameters from URDF
         self.S, self.M, self.joint_limits = self._load_from_urdf()
         self.n_joints = self.S.shape[1]
+        
+        # Precompute for performance
         self._eye6 = np.eye(6)
-        self.last_solve_info: Dict[str, Any] = {}
-
+        
     def _load_from_urdf(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Load PoE parameters from URDF file."""
+        # Math helpers
+        def skew(v):
+            return np.array([[0, -v[2], v[1]],
+                            [v[2], 0, -v[0]],
+                            [-v[1], v[0], 0]])
+
         def rpy_to_R(roll, pitch, yaw):
             cr, sr = np.cos(roll), np.sin(roll)
             cp, sp = np.cos(pitch), np.sin(pitch)
@@ -42,10 +59,8 @@ class RobotKinematics:
             p = np.array([x, y, z], dtype=float)
             return make_T(R, p)
 
-        try:
-            tree = ET.parse(self.urdf_path)
-        except FileNotFoundError as e:
-            raise FileNotFoundError(f"URDF file not found at path: {self.urdf_path}") from e
+        # URDF parsing
+        tree = ET.parse(self.urdf_path)
         root = tree.getroot()
         links = {link.attrib['name'] for link in root.findall('link')}
 
@@ -57,15 +72,18 @@ class RobotKinematics:
             child = j.find('child').attrib['link']
             origin_elem = j.find('origin')
             T_parent_joint = parse_origin(origin_elem) if origin_elem is not None else np.eye(4)
+
             axis_elem = j.find('axis')
             axis = np.array([0., 0., 1.])
             if axis_elem is not None:
                 axis = np.array(list(map(float, axis_elem.attrib['xyz'].split())))
+
             limit_elem = j.find('limit')
             limits = {'lower': -np.inf, 'upper': np.inf}
             if limit_elem is not None:
                 limits['lower'] = float(limit_elem.attrib.get('lower', -np.inf))
                 limits['upper'] = float(limit_elem.attrib.get('upper', np.inf))
+
             joints[jname] = {
                 'name': jname,
                 'type': jtype,
@@ -75,6 +93,13 @@ class RobotKinematics:
                 'T_parent_joint': T_parent_joint,
                 'limits': limits
             }
+
+        def find_base_link():
+            children = {j['child'] for j in joints.values()}
+            base_candidates = list(links - children)
+            if not base_candidates:
+                raise ValueError("Could not determine base link automatically.")
+            return base_candidates[0]
 
         def build_chain():
             child_to_joint = {j['child']: j for j in joints.values()}
@@ -89,6 +114,7 @@ class RobotKinematics:
             chain.reverse()
             return chain
 
+        # Build chain and extract PoE parameters
         chain = build_chain()
         T_base_to_here = np.eye(4)
         S_list, joint_limits_list = [], []
@@ -117,112 +143,79 @@ class RobotKinematics:
 
         S = np.array(S_list).T
         joint_limits = np.array(joint_limits_list).T
+
         return S, M, joint_limits
 
     @staticmethod
     def _skew(w: np.ndarray) -> np.ndarray:
+        """Skew-symmetric matrix from vector."""
         return np.array([[0, -w[2], w[1]],
-                         [w[2], 0, -w[0]],
-                         [-w[1], w[0], 0]])
+                        [w[2], 0, -w[0]],
+                        [-w[1], w[0], 0]])
 
     @staticmethod
     def _adjoint(T: np.ndarray) -> np.ndarray:
+        """Adjoint transformation of homogeneous matrix."""
         R, p = T[:3, :3], T[:3, 3]
         return np.block([[R, np.zeros((3, 3))],
                          [RobotKinematics._skew(p) @ R, R]])
 
     @staticmethod
-    def _so3_log(R: np.ndarray) -> np.ndarray:
-        cos_th = np.clip((np.trace(R) - 1.0) * 0.5, -1.0, 1.0)
-        theta = np.arccos(cos_th)
-        if theta < 1e-12:
-            return np.zeros(3)
-        if abs(theta - np.pi) > 1e-5:
-            s = np.sin(theta)
-            omega_hat = (R - R.T) * (0.5 / s)
-            return np.array([omega_hat[2, 1], omega_hat[0, 2], omega_hat[1, 0]]) * theta
-        Rp = (R + np.eye(3)) * 0.5
-        idx = np.argmax(np.diag(Rp))
-        v = Rp[:, idx]
-        if norm(v) < 1e-8:
-            for j in range(3):
-                v = Rp[:, j]
-                if norm(v) > 1e-8:
-                    break
-        w = v / (norm(v) + 1e-12)
-        return w * theta
-
-    @staticmethod
     def _matrix_log6(T: np.ndarray) -> np.ndarray:
+        """Matrix logarithm of homogeneous transformation."""
         R, p = T[:3, :3], T[:3, 3]
-        omega_theta = RobotKinematics._so3_log(R)
-        theta = norm(omega_theta)
+        trace_R = np.trace(R)
+        cos_th = np.clip((trace_R - 1.0) * 0.5, -1.0, 1.0)
+        theta = np.arccos(cos_th)
+
         if theta < 1e-12:
             return np.hstack([np.zeros(3), p])
-        w = omega_theta / theta
-        w_hat = RobotKinematics._skew(w)
-        w_hat2 = w_hat @ w_hat
-        c, s = np.cos(theta), np.sin(theta)
-        V = np.eye(3) * theta + (1 - c) * w_hat + (theta - s) * w_hat2
-        v = np.linalg.solve(V, p)
-        return np.hstack([omega_theta, v * theta])
+
+        s = np.sin(theta)
+        omega_hat = (R - R.T) * (0.5 / s)
+        omega = np.array([omega_hat[2, 1], omega_hat[0, 2], omega_hat[1, 0]])
+
+        I = np.eye(3)
+        omega_hat2 = omega_hat @ omega_hat
+        V_inv = (I / theta - 0.5 * omega_hat + 
+                (1.0 / theta - 0.5 / np.tan(theta / 2.0)) * omega_hat2)
+
+        v = V_inv @ p
+        return np.hstack([omega * theta, v * theta])
 
     @staticmethod
     def _matrix_exp6(xi_theta: np.ndarray) -> np.ndarray:
+        """Exponential map of twist."""
         w_theta, v_theta = xi_theta[:3], xi_theta[3:]
         theta = norm(w_theta)
         T = np.eye(4)
+
         if theta < 1e-12:
             T[:3, 3] = v_theta
             return T
+
         w = w_theta / theta
         v = v_theta / theta
         w_hat = RobotKinematics._skew(w)
         w_hat2 = w_hat @ w_hat
+
         R = np.eye(3) + np.sin(theta) * w_hat + (1 - np.cos(theta)) * w_hat2
         G = np.eye(3) * theta + (1 - np.cos(theta)) * w_hat + (theta - np.sin(theta)) * w_hat2
         p = G @ v
+
         T[:3, :3] = R
         T[:3, 3] = p
         return T
 
-    @staticmethod
-    def _reorthonormalize_R(R: np.ndarray) -> np.ndarray:
-        U, _, Vt = np.linalg.svd(R)
-        Rn = U @ Vt
-        if np.linalg.det(Rn) < 0:
-            U[:, -1] *= -1
-            Rn = U @ Vt
-        return Rn
-
-    @staticmethod
-    def is_valid_SE3(T: np.ndarray, tol: float = 1e-6) -> bool:
-        if T.shape != (4, 4):
-            return False
-        if not np.allclose(T[3], [0, 0, 0, 1], atol=tol):
-            return False
-        R = T[:3, :3]
-        RtR = R.T @ R
-        if not np.allclose(RtR, np.eye(3), atol=1e-6):
-            return False
-        if np.linalg.det(R) <= 0:
-            return False
-        return True
-
-    @staticmethod
-    def normalize_SE3(T: np.ndarray) -> np.ndarray:
-        Tn = T.copy()
-        Tn[:3, :3] = RobotKinematics._reorthonormalize_R(T[:3, :3])
-        Tn[3] = np.array([0, 0, 0, 1.0])
-        return Tn
-
     def forward_kinematics(self, q: np.ndarray) -> np.ndarray:
+        """Compute forward kinematics for given joint angles."""
         T = np.eye(4)
         for i in range(self.n_joints):
             T = T @ self._matrix_exp6(self.S[:, i] * q[i])
         return T @ self.M
 
     def jacobian_space(self, q: np.ndarray) -> np.ndarray:
+        """Compute spatial Jacobian for given joint angles."""
         J = np.zeros((6, self.n_joints))
         T = np.eye(4)
         for i in range(self.n_joints):
@@ -231,18 +224,9 @@ class RobotKinematics:
         return J
 
     def jacobian_body(self, q: np.ndarray) -> np.ndarray:
+        """Compute body Jacobian for given joint angles."""
         T = self.forward_kinematics(q)
         return self._adjoint(inv(T)) @ self.jacobian_space(q)
-
-    @staticmethod
-    def _damped_pinv(J: np.ndarray, lam: float) -> np.ndarray:
-        """
-        Damped pseudoinverse using SVD:
-        J^+ = V diag(σ / (σ^2 + lam^2)) U^T
-        """
-        U, s, Vt = np.linalg.svd(J, full_matrices=False)
-        s_damped = s / (s**2 + lam**2)
-        return (Vt.T * s_damped) @ U.T
 
     def inverse_kinematics(
         self, 
@@ -254,56 +238,61 @@ class RobotKinematics:
         damping: float = 1e-2, 
         step_scale: float = 0.5, 
         dq_max: float = 0.2,
-        num_attempts: int = 10,
-        seed: Optional[int] = None
+        num_attempts: int = 10
     ) -> Tuple[np.ndarray, bool]:
-        self.last_solve_info = {
-            'attempts': 0,
-            'iterations': 0,
-            'final_pos_err': None,
-            'final_rot_err': None,
-            'used_seed': seed,
-        }
-
-        if not self.is_valid_SE3(T_des):
-            T_des = self.normalize_SE3(T_des)
-
+        # Ensure parameters are the correct type
+        pos_tol = float(pos_tol)
+        rot_tol = float(rot_tol)
+        max_iters = int(max_iters)
+        damping = float(damping)
+        step_scale = float(step_scale)
+        dq_max = float(dq_max)
+        num_attempts = int(num_attempts)
+        """
+        Solve inverse kinematics using damped least squares.
+        
+        Args:
+            T_des: Desired end effector pose (4x4)
+            q0: Initial guess (if None, uses zero config)
+            pos_tol: Position tolerance
+            rot_tol: Rotation tolerance
+            max_iters: Maximum iterations per attempt
+            damping: Damping factor for DLS
+            step_scale: Step scaling factor
+            dq_max: Maximum joint angle change per step
+            num_attempts: Number of random attempts
+            
+        Returns:
+            q_sol: Solution joint angles
+            converged: Whether IK converged
+        """
         limits_lower, limits_upper = self.joint_limits[0].copy(), self.joint_limits[1].copy()
+        
+        # Replace infinite limits with reasonable values for sampling
         inf_mask = ~np.isfinite(limits_lower) | ~np.isfinite(limits_upper)
         limits_lower[inf_mask] = -np.pi
         limits_upper[inf_mask] = np.pi
         
+        # Default to zero configuration
         if q0 is None:
             q0 = np.clip(np.zeros(self.n_joints), limits_lower, limits_upper)
-
-        rng = np.random.default_rng(seed) if seed is not None else np.random.default_rng()
-
-        q_sol, converged, iters, pos_err, rot_err = self._ik_dls(
+        
+        # Try with initial guess first
+        q_sol, converged = self._ik_dls(
             T_des, q0, pos_tol, rot_tol, max_iters, damping, step_scale, dq_max
         )
-        self.last_solve_info['attempts'] += 1
-        self.last_solve_info['iterations'] += iters
-
         if converged:
-            self.last_solve_info['final_pos_err'] = pos_err
-            self.last_solve_info['final_rot_err'] = rot_err
             return q_sol, True
         
+        # Try with random starts
         for _ in range(num_attempts - 1):
-            q0 = rng.uniform(limits_lower, limits_upper)
-            q_sol, converged, iters, pos_err, rot_err = self._ik_dls(
+            q0 = np.random.uniform(limits_lower, limits_upper)
+            q_sol, converged = self._ik_dls(
                 T_des, q0, pos_tol, rot_tol, max_iters, damping, step_scale, dq_max
             )
-            self.last_solve_info['attempts'] += 1
-            self.last_solve_info['iterations'] += iters
-
             if converged:
-                self.last_solve_info['final_pos_err'] = pos_err
-                self.last_solve_info['final_rot_err'] = rot_err
                 return q_sol, True
         
-        self.last_solve_info['final_pos_err'] = pos_err
-        self.last_solve_info['final_rot_err'] = rot_err
         return q_sol, False
 
     def _ik_dls(
@@ -316,74 +305,41 @@ class RobotKinematics:
         damping: float, 
         step_scale: float, 
         dq_max: float
-    ) -> Tuple[np.ndarray, bool, int, float, float]:
-        """
-        DLS IK with SVD-damped pseudoinverse and backtracking line search.
-        Returns (q, converged, iterations, pos_err, rot_err).
-        """
+    ) -> Tuple[np.ndarray, bool]:
+        """Damped least-squares IK implementation."""
         q = q0.copy()
         limits_lower, limits_upper = self.joint_limits[0], self.joint_limits[1]
-
-        # Initial error
-        T_cur = self.forward_kinematics(q)
-        T_err = inv(T_cur) @ T_des
-        Vb = self._matrix_log6(T_err)
-        rot_err = norm(Vb[:3])
-        pos_err = norm(Vb[3:])
-        total_err = norm(Vb)
-
-        lam = max(damping, 1e-6)
-        lam_min, lam_max = 1e-6, 1.0
-
-        for it in range(1, max_iters + 1):
+        
+        for _ in range(max_iters):
+            T_cur = self.forward_kinematics(q)
+            T_err = inv(T_cur) @ T_des
+            Vb = self._matrix_log6(T_err)
+            
+            rot_err = norm(Vb[:3])
+            pos_err = norm(Vb[3:])
             if rot_err < rot_tol and pos_err < pos_tol:
-                return q, True, it - 1, pos_err, rot_err
-
+                return q, True
+            
             Jb = self.jacobian_body(q)
-
-            # SVD-based damped pseudoinverse
-            J_pinv = self._damped_pinv(Jb, lam)
-            dq = J_pinv @ Vb
-
+            JJt = Jb @ Jb.T
+            dq = Jb.T @ np.linalg.solve(JJt + (damping ** 2) * self._eye6, Vb)
+            
             # Step limiting
             max_abs = np.max(np.abs(dq))
             if max_abs > dq_max:
                 dq *= dq_max / max_abs
-
-            # Backtracking line search to reduce total error
-            gamma = step_scale
-            accepted = False
-            for _ in range(20):
-                q_trial = q + gamma * dq
-                np.clip(q_trial, limits_lower, limits_upper, out=q_trial)
-
-                T_trial = self.forward_kinematics(q_trial)
-                T_err_trial = inv(T_trial) @ T_des
-                Vb_trial = self._matrix_log6(T_err_trial)
-                total_err_trial = norm(Vb_trial)
-
-                if total_err_trial < total_err:
-                    q = q_trial
-                    Vb = Vb_trial
-                    total_err = total_err_trial
-                    rot_err = norm(Vb[:3])
-                    pos_err = norm(Vb[3:])
-                    accepted = True
-                    # Reduce damping on successful step
-                    lam = max(lam * 0.8, lam_min)
-                    break
-                gamma *= 0.5
-
-            if not accepted:
-                # Increase damping to add robustness, allow tiny progress next iter
-                lam = min(lam * 2.0, lam_max)
-
-        return q, False, max_iters, pos_err, rot_err
+                
+            q += step_scale * dq
+            np.clip(q, limits_lower, limits_upper, out=q)
+            
+        return q, False
 
     def check_pose_error(self, T_des: np.ndarray, q: np.ndarray) -> Tuple[float, float]:
+        """Calculate position and orientation error between desired and actual pose."""
         T_actual = self.forward_kinematics(q)
-        T_err = inv(T_actual) @ T_des
-        Vb = self._matrix_log6(T_err)
-        rot_err = norm(Vb[:3])
-        pos_err = norm(Vb[3:])
-        return pos_err, rot_err
+        pos_err = norm(T_actual[:3, 3] - T_des[:3, 3])
+        
+        R_err = inv(T_actual[:3, :3]) @ T_des[:3, :3]
+        angle = np.arccos(np.clip((np.trace(R_err) - 1) / 2.0, -1.0, 1.0))
+        
+        return pos_err, angle

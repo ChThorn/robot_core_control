@@ -14,13 +14,12 @@ def main():
     print("Target FK Pose (T_des):")
     print(np.round(T_des, 4))
     
-    # Solve IK (deterministic with seed for reproducibility)
+    # Solve IK
     q_sol, converged = robot.inverse_kinematics(
         T_des, 
         num_attempts=15,
         pos_tol=1e-6,
-        rot_tol=1e-3,
-        seed=123
+        rot_tol=1e-6
     )
     
     print(f"\nRecovered q from IK: {np.round(q_sol, 6)}")
@@ -30,7 +29,6 @@ def main():
         pos_err, rot_err = robot.check_pose_error(T_des, q_sol)
         print(f"Position error: {pos_err:.6e} meters")
         print(f"Rotation error: {rot_err:.6e} radians")
-        print(f"Iterations: {robot.last_solve_info.get('iterations')}")
 
 if __name__ == "__main__":
     main()

@@ -1,0 +1,81 @@
+2025-09-02 08:48:47,928 - config_prod - INFO - Applying production environment overrides
+2025-09-02 08:48:47,928 - config_prod - INFO - Configuration loaded from robot_config_prod.yaml for environment: production
+2025-09-02 08:48:47,929 - robot_kinematics_prod - INFO - Robot kinematics initialized with 6 joints.
+2025-09-02 08:48:47,930 - robot_kinematics_main - INFO - === Testing original test case ===
+2025-09-02 08:48:48,080 - robot_kinematics_prod - INFO - IK converged after 2 attempts.
+2025-09-02 08:48:48,080 - robot_kinematics_main - INFO - IK solved in 0.1494s - Pos err: 8.632770e-07m, Rot err: 1.712013e-07rad
+2025-09-02 08:48:48,080 - robot_kinematics_main - INFO - Sending to robot controller: [ 28.64789634   5.72871191  11.46074671  45.83537032 -22.91881374
+  34.37882182]
+2025-09-02 08:48:48,080 - robot_kinematics_main - INFO - Command sent successfully
+2025-09-02 08:48:48,080 - robot_kinematics_main - INFO - 
+=== Validating against real robot data ===
+2025-09-02 08:48:48,080 - robot_kinematics_main - INFO - Validating kinematics against real data: third_20250710_162459.json
+2025-09-02 08:48:48,081 - robot_kinematics_main - INFO - Validation complete - Mean pos error: 0.001673m, Max pos error: 0.002277m
+2025-09-02 08:48:48,081 - robot_kinematics_main - INFO - ✓ Position accuracy is excellent
+2025-09-02 08:48:48,081 - robot_kinematics_main - INFO - 
+=== Performance Statistics ===
+2025-09-02 09:02:24,078 - config_prod - INFO - Applying production environment overrides
+2025-09-02 09:02:24,078 - config_prod - INFO - Configuration loaded from robot_config_prod.yaml for environment: production
+2025-09-02 09:02:24,079 - robot_kinematics_prod - INFO - Robot kinematics initialized with 6 joints.
+2025-09-02 09:02:24,079 - robot_kinematics_main - INFO - === Testing original test case ===
+2025-09-02 09:02:24,222 - robot_kinematics_prod - INFO - IK converged after 2 attempts.
+2025-09-02 09:02:24,222 - robot_kinematics_main - INFO - IK solved in 0.1429s - Pos err: 8.899796e-07m, Rot err: 7.333431e-07rad
+2025-09-02 09:02:24,223 - robot_kinematics_main - INFO - Sending to robot controller: [-157.02373892   -5.7286902   -11.46077984   48.47603387   21.68993081
+ -142.6187549 ]
+2025-09-02 09:02:24,223 - robot_kinematics_main - INFO - Command sent successfully
+2025-09-02 09:02:24,223 - robot_kinematics_main - INFO - 
+=== Testing orientation modes ===
+2025-09-02 09:02:24,223 - robot_kinematics_main - INFO - Testing different orientation modes...
+2025-09-02 09:02:24,223 - robot_kinematics_main - INFO - Testing orientation mode: radians
+2025-09-02 09:02:24,223 - robot_kinematics_main - INFO - Validating kinematics against real data: third_20250710_162459.json
+2025-09-02 09:02:24,224 - robot_kinematics_main - INFO - Validation complete - Mean pos error: 0.001673m, Mean rot error: 2.172987rad
+2025-09-02 09:02:24,224 - robot_kinematics_main - INFO - Mode radians: rot_err=2.172987rad
+2025-09-02 09:02:24,224 - robot_kinematics_main - INFO - Testing orientation mode: degrees
+2025-09-02 09:02:24,224 - robot_kinematics_main - INFO - Validating kinematics against real data: third_20250710_162459.json
+2025-09-02 09:02:24,225 - robot_kinematics_main - INFO - Validation complete - Mean pos error: 0.001673m, Mean rot error: 0.001007rad
+2025-09-02 09:02:24,225 - robot_kinematics_main - INFO - Mode degrees: rot_err=0.001007rad
+2025-09-02 09:02:24,225 - robot_kinematics_main - INFO - Testing orientation mode: zyx
+2025-09-02 09:02:24,225 - robot_kinematics_main - INFO - Validating kinematics against real data: third_20250710_162459.json
+2025-09-02 09:02:24,226 - robot_kinematics_main - INFO - Validation complete - Mean pos error: 0.001673m, Mean rot error: 2.172987rad
+2025-09-02 09:02:24,226 - robot_kinematics_main - INFO - Mode zyx: rot_err=2.172987rad
+2025-09-02 09:02:24,226 - robot_kinematics_main - INFO - Testing orientation mode: zxy
+2025-09-02 09:02:24,226 - robot_kinematics_main - INFO - Validating kinematics against real data: third_20250710_162459.json
+2025-09-02 09:02:24,226 - robot_kinematics_main - INFO - Validation complete - Mean pos error: 0.001673m, Mean rot error: 1.889556rad
+2025-09-02 09:02:24,226 - robot_kinematics_main - INFO - Mode zxy: rot_err=1.889556rad
+2025-09-02 09:02:24,226 - robot_kinematics_main - INFO - Best orientation mode: degrees (rot_err=0.001007rad)
+2025-09-02 09:02:24,226 - robot_kinematics_main - INFO - ✅ Found good orientation mode: degrees
+2025-09-02 09:02:24,226 - robot_kinematics_main - INFO - 
+=== Final validation with degrees mode ===
+2025-09-02 09:02:24,226 - robot_kinematics_main - INFO - Validating kinematics against real data: third_20250710_162459.json
+2025-09-02 09:02:24,227 - robot_kinematics_main - INFO - Validation complete - Mean pos error: 0.001673m, Mean rot error: 0.001007rad
+2025-09-02 09:02:24,227 - robot_kinematics_main - INFO - ✅ SYSTEM IS READY FOR PRODUCTION!
+2025-09-02 09:02:24,227 - robot_kinematics_main - INFO - 
+=== Performance Statistics ===
+2025-09-02 09:05:15,569 - config_prod - INFO - Applying production environment overrides
+2025-09-02 09:05:15,569 - config_prod - INFO - Configuration loaded from robot_config_prod_fixed.yaml for environment: production
+2025-09-02 09:05:15,570 - robot_kinematics_prod - INFO - Robot kinematics initialized with 6 joints.
+2025-09-02 09:05:15,570 - robot_kinematics_main - INFO - Validating kinematics against real data: third_20250710_162459.json
+2025-09-02 09:05:15,571 - robot_kinematics_main - INFO - Validation complete - Mean pos error: 0.001715m, Mean rot error: 0.010888rad
+2025-09-02 09:05:15,572 - robot_kinematics_main - INFO - Validating kinematics against real data: third_20250710_162459.json
+2025-09-02 09:05:15,573 - robot_kinematics_main - INFO - Validation complete - Mean pos error: 0.001715m, Mean rot error: 0.001063rad
+2025-09-02 09:05:15,573 - robot_kinematics_main - INFO - Validating kinematics against real data: third_20250710_162459.json
+2025-09-02 09:05:15,574 - robot_kinematics_main - INFO - Validation complete - Mean pos error: 0.001715m, Mean rot error: 1.684986rad
+2025-09-02 09:05:15,574 - robot_kinematics_main - INFO - Validating kinematics against real data: third_20250710_162459.json
+2025-09-02 09:05:15,575 - robot_kinematics_main - INFO - Validation complete - Mean pos error: 0.001715m, Mean rot error: 0.001063rad
+2025-09-02 09:05:15,582 - config_prod - INFO - Applying production environment overrides
+2025-09-02 09:05:15,582 - config_prod - INFO - Configuration loaded from robot_config_prod_fixed.yaml for environment: production
+2025-09-02 09:05:15,583 - robot_kinematics_prod - INFO - Robot kinematics initialized with 6 joints.
+2025-09-02 09:11:57,521 - config_prod - INFO - Applying production environment overrides
+2025-09-02 09:11:57,522 - config_prod - INFO - Configuration loaded from robot_config_prod_fixed.yaml for environment: production
+2025-09-02 09:11:57,522 - robot_kinematics_prod - INFO - Robot kinematics initialized with 6 joints.
+2025-09-02 09:11:57,522 - robot_kinematics_main - INFO - Validating kinematics against real data: third_20250710_162459.json
+2025-09-02 09:11:57,523 - robot_kinematics_main - INFO - Validation complete - Mean pos error: 0.001715m, Mean rot error: 0.010888rad
+2025-09-02 09:11:57,523 - robot_kinematics_main - INFO - Validating kinematics against real data: third_20250710_162459.json
+2025-09-02 09:11:57,524 - robot_kinematics_main - INFO - Validation complete - Mean pos error: 0.001715m, Mean rot error: 0.001063rad
+2025-09-02 09:11:57,525 - robot_kinematics_main - INFO - Validating kinematics against real data: third_20250710_162459.json
+2025-09-02 09:11:57,525 - robot_kinematics_main - INFO - Validation complete - Mean pos error: 0.001715m, Mean rot error: 1.684986rad
+2025-09-02 09:11:57,526 - robot_kinematics_main - INFO - Validating kinematics against real data: third_20250710_162459.json
+2025-09-02 09:11:57,526 - robot_kinematics_main - INFO - Validation complete - Mean pos error: 0.001715m, Mean rot error: 0.001063rad
+2025-09-02 09:11:57,532 - config_prod - INFO - Applying production environment overrides
+2025-09-02 09:11:57,532 - config_prod - INFO - Configuration loaded from robot_config_prod_fixed.yaml for environment: production
+2025-09-02 09:11:57,533 - robot_kinematics_prod - INFO - Robot kinematics initialized with 6 joints.

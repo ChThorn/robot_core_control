@@ -1,0 +1,84 @@
+robot:
+  urdf_path: rb3_730es_u.urdf
+  ee_link: tcp
+  base_link: link0
+  joint_limits_deg:
+  - [-180, 180]
+  - [-180, 180]
+  - [-180, 180]
+  - [-180, 180]
+  - [-180, 180]
+  - [-180, 180]
+  workspace_limits:
+    x_range: [-1.0, 1.0]
+    y_range: [-1.0, 1.0]
+    z_range: [0.0, 1.5]
+
+kinematics:
+  inverse_kinematics:
+    pos_tol: 1.0e-06
+    rot_tol: 1.0e-06
+    max_iters: 300
+    damping: 0.01
+    step_scale: 0.5
+    dq_max: 0.2
+    num_attempts: 10
+
+robot_controller:
+  ip_address: 192.168.1.100
+  port: 30003
+  timeout: 5.0
+  units:
+    joint_angles: degrees
+    positions: millimeters
+    orientations: radians
+  # Orientation handling configuration
+  orientation_mode: auto_detect  # Options: auto_detect, radians, degrees, quaternion
+  rpy_convention: zyx           # Options: xyz, zyx, zxy (most robots use zyx)
+  quaternion_format: wxyz       # Options: wxyz, xyzw (if using quaternions)
+
+validation:
+  position_tolerance: 0.005
+  rotation_tolerance: 0.1      # Increased to 0.1 rad (~5.7 degrees) for initial validation
+  max_samples: 100
+
+performance:
+  log_statistics: true
+  max_ik_time: 1.0
+  warning_thresholds:
+    position_error: 0.01
+    rotation_error: 0.1        # Adjusted threshold
+    ik_success_rate: 0.95
+
+logging:
+  level: INFO
+  file: robot_kinematics.log
+  max_size_mb: 10
+  backup_count: 5
+
+environments:
+  development:
+    logging:
+      level: DEBUG
+    kinematics:
+      inverse_kinematics:
+        num_attempts: 5
+    robot_controller:
+      orientation_mode: auto_detect
+      
+  testing:
+    validation:
+      max_samples: 50
+    robot_controller:
+      orientation_mode: degrees
+      rpy_convention: zyx
+      
+  production:
+    logging:
+      level: INFO
+    performance:
+      log_statistics: true
+    robot_controller:
+      orientation_mode: auto_detect  # Will be set automatically after testing
+      rpy_convention: zyx
+

@@ -20,15 +20,6 @@ class RobotConfig:
             'damping': float(self.ik_params.get('damping', 1e-2)),
             'step_scale': float(self.ik_params.get('step_scale', 0.5)),
             'dq_max': float(self.ik_params.get('dq_max', 0.2)),
-            'num_attempts': int(self.ik_params.get('num_attempts', 10)),
+            'num_attempts': int(self.ik_params.get('num_attempts', 10))
         }
-        # Optional deterministic seed
-        seed = self.ik_params.get('seed', None)
-        if seed is not None:
-            try:
-                params['seed'] = int(seed)
-            except Exception:
-                params['seed'] = None
-        else:
-            params['seed'] = None
         return params
