@@ -1,0 +1,25 @@
+# Configuration for workspace boundaries and obstacles
+workspace:
+  x_min: -500
+  x_max: 500
+  y_min: -500
+  y_max: 500
+  z_min: 0
+  z_max: 1000
+obstacles:
+  - name: "box1"
+    type: "box"
+    center: [100, 100, 200]
+    size: [100, 100, 100]  # width, depth, height (mm)
+  - name: "cylinder1"
+    type: "cylinder"
+    center: [-200, 0, 300]
+    radius: 50
+    height: 200
+orientation_limits:
+  roll_min: -180
+  roll_max: 180
+  pitch_min: -90
+  pitch_max: 90
+  yaw_min: -180
+  yaw_max: 180

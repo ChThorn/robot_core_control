@@ -9,6 +9,8 @@ from numpy.linalg import norm, inv
 import xml.etree.ElementTree as ET
 from typing import Tuple, Optional
 import logging
+import yaml
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -19,10 +21,66 @@ class RobotKinematicsError(Exception):
 class RobotKinematics:
     """Production-ready robot kinematics class using PoE formulation."""
     
-    def __init__(self, urdf_path: str, ee_link: str = "tcp", base_link: str = "link0"):
+    def __init__(self, urdf_path: str, ee_link: str = "tcp", base_link: str = "link0", constraints_path: Optional[str] = None):
         self.urdf_path = urdf_path
         self.ee_link = ee_link
         self.base_link = base_link
+        self.constraints_path = constraints_path or os.path.join(os.path.dirname(__file__), "constraints.yaml")
+        self.constraints = self._load_constraints(self.constraints_path)
+        
+        try:
+            self.S, self.M, self.joint_limits = self._load_from_urdf()
+        except FileNotFoundError:
+            raise RobotKinematicsError(f"URDF file not found at: {urdf_path}")
+        except ET.ParseError:
+            raise RobotKinematicsError(f"Failed to parse URDF file: {urdf_path}")
+        except (KeyError, ValueError) as e:
+            raise RobotKinematicsError(f"Error parsing URDF structure: {e}")
+
+        self.n_joints = self.S.shape[1]
+        if self.n_joints == 0:
+            raise RobotKinematicsError("No active joints found in the kinematic chain.")
+
+        self._eye6 = np.eye(6)
+        logger.info(f"Robot kinematics initialized with {self.n_joints} joints.")
+    def _load_constraints(self, path):
+        if not os.path.exists(path):
+            logger.warning(f"Constraints file not found: {path}")
+            return {}
+        with open(path, "r") as f:
+            return yaml.safe_load(f)
+    def _check_workspace(self, pos: np.ndarray) -> bool:
+        ws = self.constraints.get("workspace", {})
+        if not ws:
+            return True
+        return (ws["x_min"] <= pos[0] <= ws["x_max"] and
+                ws["y_min"] <= pos[1] <= ws["y_max"] and
+                ws["z_min"] <= pos[2] <= ws["z_max"])
+
+    def _check_orientation(self, rpy: np.ndarray) -> bool:
+        limits = self.constraints.get("orientation_limits", {})
+        if not limits:
+            return True
+        roll, pitch, yaw = np.degrees(rpy)
+        return (limits["roll_min"] <= roll <= limits["roll_max"] and
+                limits["pitch_min"] <= pitch <= limits["pitch_max"] and
+                limits["yaw_min"] <= yaw <= limits["yaw_max"])
+
+    def _check_obstacles(self, pos: np.ndarray) -> bool:
+        obstacles = self.constraints.get("obstacles", [])
+        for obs in obstacles:
+            if obs["type"] == "box":
+                c = np.array(obs["center"])
+                s = np.array(obs["size"]) / 2.0
+                if np.all(np.abs(pos - c) <= s):
+                    return False
+            elif obs["type"] == "cylinder":
+                c = np.array(obs["center"])
+                r = obs["radius"]
+                h = obs["height"] / 2.0
+                if (np.linalg.norm(pos[:2] - c[:2]) <= r and abs(pos[2] - c[2]) <= h):
+                    return False
+        return True
         
         try:
             self.S, self.M, self.joint_limits = self._load_from_urdf()
@@ -222,13 +280,22 @@ class RobotKinematics:
         return T
 
     def forward_kinematics(self, q: np.ndarray) -> np.ndarray:
-        """Compute forward kinematics for given joint angles."""
+        """Compute forward kinematics for given joint angles, with workspace and obstacle checks."""
         if not isinstance(q, np.ndarray) or q.ndim != 1 or q.shape[0] != self.n_joints:
             raise ValueError(f"Input q must be a numpy array of shape ({self.n_joints},)")
         T = np.eye(4)
         for i in range(self.n_joints):
             T = T @ self._matrix_exp6(self.S[:, i] * q[i])
-        return T @ self.M
+        T = T @ self.M
+        pos = T[:3, 3]
+        rpy = self.matrix_to_rpy(T[:3, :3])
+        if not self._check_workspace(pos):
+            logger.warning(f"FK: Position {pos} out of workspace bounds.")
+        if not self._check_orientation(rpy):
+            logger.warning(f"FK: Orientation {rpy} out of limits.")
+        if not self._check_obstacles(pos):
+            logger.warning(f"FK: Position {pos} collides with obstacle.")
+        return T
 
     def jacobian_body(self, q: np.ndarray) -> np.ndarray:
         """Compute body Jacobian for given joint angles."""
@@ -260,35 +327,55 @@ class RobotKinematics:
             dq_max: float = 0.2,
             num_attempts: int = 10
         ) -> Tuple[Optional[np.ndarray], bool]:
-            """Solve inverse kinematics with enhanced singularity handling."""
-            
-            # First check if we're trying to reach the home position
-            T_home = self.forward_kinematics(np.zeros(self.n_joints))
-            home_pos_err = np.linalg.norm(T_des[:3, 3] - T_home[:3, 3])
-            home_rot_err = np.arccos(np.clip((np.trace(T_des[:3, :3].T @ T_home[:3, :3]) - 1) / 2.0, -1.0, 1.0))
-            
-            if home_pos_err < pos_tol and home_rot_err < rot_tol:
-                logger.info("Target is home position, returning zero joints")
-                return np.zeros(self.n_joints), True
-            
-            limits_lower, limits_upper = self.joint_limits[0], self.joint_limits[1]
-            
-            # Use provided initial guess if available
-            if q_init is not None:
-                q_sol, converged = self._ik_dls(T_des, q_init, pos_tol, rot_tol, max_iters, damping, step_scale, dq_max)
-                if converged:
+        """Solve inverse kinematics with obstacle, workspace, and orientation constraints."""
+        # Check workspace, orientation, and obstacle for desired pose
+        pos = T_des[:3, 3]
+        rpy = self.matrix_to_rpy(T_des[:3, :3])
+        if not self._check_workspace(pos):
+            logger.warning(f"IK: Desired position {pos} out of workspace bounds.")
+            return None, False
+        if not self._check_orientation(rpy):
+            logger.warning(f"IK: Desired orientation {rpy} out of limits.")
+            return None, False
+        if not self._check_obstacles(pos):
+            logger.warning(f"IK: Desired position {pos} collides with obstacle.")
+            return None, False
+
+        # First check if we're trying to reach the home position
+        T_home = self.forward_kinematics(np.zeros(self.n_joints))
+        home_pos_err = np.linalg.norm(T_des[:3, 3] - T_home[:3, 3])
+        home_rot_err = np.arccos(np.clip((np.trace(T_des[:3, :3].T @ T_home[:3, :3]) - 1) / 2.0, -1.0, 1.0))
+        if home_pos_err < pos_tol and home_rot_err < rot_tol:
+            logger.info("Target is home position, returning zero joints")
+            return np.zeros(self.n_joints), True
+
+        limits_lower, limits_upper = self.joint_limits[0], self.joint_limits[1]
+
+        # Use provided initial guess if available
+        if q_init is not None:
+            q_sol, converged = self._ik_dls(T_des, q_init, pos_tol, rot_tol, max_iters, damping, step_scale, dq_max)
+            if converged:
+                # Check constraints for solution
+                T_sol = self.forward_kinematics(q_sol)
+                pos_sol = T_sol[:3, 3]
+                rpy_sol = self.matrix_to_rpy(T_sol[:3, :3])
+                if self._check_workspace(pos_sol) and self._check_orientation(rpy_sol) and self._check_obstacles(pos_sol):
                     return q_sol, True
 
-            # Try with random starts
-            for i in range(num_attempts):
-                q0 = np.random.uniform(limits_lower, limits_upper)
-                q_sol, converged = self._ik_dls(T_des, q0, pos_tol, rot_tol, max_iters, damping, step_scale, dq_max)
-                if converged:
+        # Try with random starts
+        for i in range(num_attempts):
+            q0 = np.random.uniform(limits_lower, limits_upper)
+            q_sol, converged = self._ik_dls(T_des, q0, pos_tol, rot_tol, max_iters, damping, step_scale, dq_max)
+            if converged:
+                T_sol = self.forward_kinematics(q_sol)
+                pos_sol = T_sol[:3, 3]
+                rpy_sol = self.matrix_to_rpy(T_sol[:3, :3])
+                if self._check_workspace(pos_sol) and self._check_orientation(rpy_sol) and self._check_obstacles(pos_sol):
                     logger.debug(f"IK converged after {i+1} attempts.")
                     return q_sol, True
-            
-            logger.warning("IK failed to converge after all attempts.")
-            return None, False
+
+        logger.warning("IK failed to converge after all attempts or constraints not satisfied.")
+        return None, False
 
 
     def _ik_dls(self, T_des: np.ndarray, q0: np.ndarray, pos_tol: float, rot_tol: float, 
