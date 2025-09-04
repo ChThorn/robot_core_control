@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class RobotController:
     """Production robot controller interface."""
     
-    def __init__(self, urdf_path: str, ee_link: str = "tcp", base_link: str = "link0", 
+    def __init__(self, ee_link: str = "tcp", base_link: str = "link0", 
                  config_file: str = None):
         """Initialize robot controller with configuration management."""
         try:
@@ -38,7 +38,8 @@ class RobotController:
             self.config = None
         
         try:
-            self.robot = RobotKinematics(urdf_path, ee_link, base_link)
+            # The urdf_path argument is no longer needed
+            self.robot = RobotKinematics(ee_link, base_link)
         except RobotKinematicsError as e:
             logger.error(f"Failed to initialize robot kinematics: {e}")
             raise
@@ -86,14 +87,10 @@ class RobotController:
             q_rad: Joint positions in radians
             T: Homogeneous transformation matrix
         """
-        # Convert joint positions from degrees to radians
         q_rad = np.deg2rad(joint_positions_deg)
-        
-        # Convert TCP position from mm to m and orientation from degrees to radians
         tcp_pos_m = tcp_position_mm_rpy_deg[:3] / 1000.0
         tcp_rpy_rad = np.deg2rad(tcp_position_mm_rpy_deg[3:])
         
-        # Create homogeneous transformation matrix
         R = self.robot.rpy_to_matrix(tcp_rpy_rad)
         T = np.eye(4)
         T[:3, :3] = R
@@ -126,7 +123,6 @@ class RobotController:
         try:
             start_time = time.time()
             
-            # First check if we're trying to reach the home position
             T_home = self.robot.forward_kinematics(np.zeros(self.robot.n_joints))
             home_pos_err = np.linalg.norm(T_des[:3, 3] - T_home[:3, 3])
             home_rot_err = np.arccos(np.clip((np.trace(T_des[:3, :3].T @ T_home[:3, :3]) - 1) / 2.0, -1.0, 1.0))
@@ -137,90 +133,73 @@ class RobotController:
             
             limits_lower, limits_upper = self.robot.joint_limits[0], self.robot.joint_limits[1]
             
-            # Try different initial configurations to find the best solution
             best_q = None
             best_error = float('inf')
             best_converged = False
             
             attempts_configs = []
             
-            # Use provided initial guess if available
             if q_init is not None:
                 attempts_configs.append(q_init)
             
-            # Add some strategic initial guesses
             attempts_configs.extend([
-                np.zeros(self.robot.n_joints),  # Home position
-                (limits_lower + limits_upper) / 2,  # Mid-range
+                np.zeros(self.robot.n_joints),
+                (limits_lower + limits_upper) / 2,
             ])
             
-            # Add more diverse random configurations for better global search
             for _ in range(self.ik_params['num_attempts'] - len(attempts_configs)):
-                # Use different random strategies
                 if len(attempts_configs) % 3 == 0:
-                    # Uniform random
                     q_rand = np.random.uniform(limits_lower, limits_upper)
                 elif len(attempts_configs) % 3 == 1:
-                    # Gaussian around mid-range
                     mid = (limits_lower + limits_upper) / 2
                     std = (limits_upper - limits_lower) / 6
                     q_rand = np.random.normal(mid, std)
                     q_rand = np.clip(q_rand, limits_lower, limits_upper)
                 else:
-                    # Small perturbation around provided initial guess if available
                     base = q_init if q_init is not None else np.zeros(self.robot.n_joints)
                     q_rand = base + np.random.normal(0, 0.2, self.robot.n_joints)
                     q_rand = np.clip(q_rand, limits_lower, limits_upper)
                 
                 attempts_configs.append(q_rand)
             
-            # Try each configuration
             for i, q0 in enumerate(attempts_configs):
                 q_sol, converged = self.robot._ik_dls(
                     T_des, q0, **{k: v for k, v in self.ik_params.items() if k != 'num_attempts'}
                 )
                 
                 if q_sol is not None:
-                    # Evaluate solution quality
                     T_check = self.robot.forward_kinematics(q_sol)
                     pos_err, rot_err = self.robot.check_pose_error(T_des, q_sol)
                     total_err = pos_err + rot_err
                     
-                    # Update best solution
                     if total_err < best_error:
                         best_error = total_err
                         best_q = q_sol.copy()
                         best_converged = converged
                         
-                        # Early exit if we found a perfect solution
                         if converged:
                             logger.debug(f"IK converged on attempt {i+1}")
                             break
                             
-                        # For real robot data, accept solutions that are "close enough"
-                        # Use combined error metric (position + weighted rotation)
-                        combined_err = pos_err + rot_err * 0.1  # 0.1m per radian weighting
-                        if combined_err < 3e-3:  # 3mm combined error tolerance
+                        combined_err = pos_err + rot_err * 0.1
+                        if combined_err < 3e-3:
                             logger.debug(f"IK found acceptable solution on attempt {i+1} "
                                        f"(pos_err={pos_err*1000:.1f}mm, rot_err={np.rad2deg(rot_err):.2f}deg, "
                                        f"combined={combined_err*1000:.1f}mm)")
                             best_converged = True
                             break
                             
-                        # Even more generous acceptance for very good solutions
-                        if combined_err < 4e-3:  # 4mm combined error
+                        if combined_err < 4e-3:
                             logger.debug(f"IK found very good solution on attempt {i+1}")
                             best_converged = True
                             break
             
             computation_time = time.time() - start_time
             
-            # Update performance statistics
             self.performance_stats['ik_calls'] += 1
             if best_converged:
                 self.performance_stats['ik_successes'] += 1
                 
-                # Calculate errors for monitoring
                 if best_q is not None:
                     pos_err, rot_err = self.robot.check_pose_error(T_des, best_q)
                     self.performance_stats['max_position_error'] = max(
@@ -240,7 +219,6 @@ class RobotController:
                 else:
                     logger.warning(f"IK completely failed after {computation_time:.4f}s")
             
-            # Update average IK time
             total_calls = self.performance_stats['ik_calls']
             self.performance_stats['avg_ik_time'] = (
                 (self.performance_stats['avg_ik_time'] * (total_calls - 1) + computation_time) / total_calls
@@ -277,17 +255,14 @@ class RobotController:
             wp = waypoints[i]
             
             try:
-                # Convert units and compute FK
                 q_deg = np.array(wp['joint_positions'])
                 tcp_recorded = np.array(wp['tcp_position'])
                 
                 q_rad, T_recorded = self.convert_from_robot_units(q_deg, tcp_recorded)
                 T_fk = self.forward_kinematics(q_rad)
                 
-                # Calculate errors
                 pos_err = np.linalg.norm(T_fk[:3, 3] - T_recorded[:3, 3])
                 
-                # Calculate rotation error using rotation matrix comparison
                 R_fk = T_fk[:3, :3]
                 R_recorded = T_recorded[:3, :3]
                 R_err = R_fk.T @ R_recorded
@@ -316,28 +291,17 @@ class RobotController:
                      dry_run: bool = True) -> bool:
         """
         Send joint angles to robot controller.
-        
-        Args:
-            q_rad: Joint angles in radians
-            validate_limits: Whether to check joint limits
-            dry_run: If True, only simulate the command without sending
-            
-        Returns:
-            bool: Success status
         """
         try:
             q_deg = self.convert_to_robot_units(q_rad)
             
-            # Validate joint limits
             if validate_limits:
                 limits_deg = np.rad2deg(self.robot.joint_limits)
                 
-                # Apply safety margin if configured
-                margin = 0.05  # Default 5% margin
+                margin = 0.05
                 if self.config:
                     margin = self.config.get('safety', 'joint_limit_margin')
                 
-                # Check limits with margin
                 limit_range = limits_deg[1] - limits_deg[0]
                 margin_abs = limit_range * margin
                 
@@ -350,7 +314,6 @@ class RobotController:
                     logger.error(f"Safe limits: [{effective_lower}, {effective_upper}]")
                     return False
             
-            # Check for NaN or infinite values
             if not np.all(np.isfinite(q_deg)):
                 logger.error("Joint angles contain NaN or infinite values")
                 return False
@@ -359,14 +322,6 @@ class RobotController:
                 logger.info(f"[DRY RUN] Would send to robot: {np.round(q_deg, 3)}")
                 return True
             else:
-                # PRODUCTION: Implement actual robot communication here
-                # This should be replaced with actual robot driver interface:
-                # 
-                # Examples:
-                # - ROS2 action client: self.robot_client.send_goal(q_deg)
-                # - TCP socket: self.socket.send(format_command(q_deg))
-                # - Vendor API: self.robot_api.move_joints(q_deg)
-                #
                 logger.warning("Production robot communication not implemented")
                 logger.info(f"Command to send: {np.round(q_deg, 3)}")
                 return False
@@ -390,4 +345,3 @@ class RobotController:
             'fk_calls': 0, 'ik_calls': 0, 'ik_successes': 0,
             'avg_ik_time': 0.0, 'max_position_error': 0.0, 'max_rotation_error': 0.0
         }
-

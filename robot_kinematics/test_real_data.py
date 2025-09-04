@@ -11,12 +11,14 @@ import matplotlib.pyplot as plt
 from typing import Dict, List, Tuple, Any
 from robot_controller import RobotController
 
+
 class RealDataValidator:
     """Comprehensive validator for robot kinematics using real data."""
     
-    def __init__(self, urdf_path: str, json_path: str):
+    def __init__(self, json_path: str):
         """Initialize validator with robot model and real data."""
-        self.controller = RobotController(urdf_path)
+        # The urdf_path is no longer needed for the controller
+        self.controller = RobotController()
         self.json_path = json_path
         self.results = {}
         
@@ -333,7 +335,8 @@ class RealDataValidator:
         report.append("ROBOT KINEMATICS VALIDATION REPORT")
         report.append("=" * 50)
         report.append(f"Data source: {self.json_path}")
-        report.append(f"Robot model: {self.controller.robot.urdf_path}")
+        # The urdf_path attribute no longer exists; provide a static description
+        report.append("Robot model: RB3-730ES-U (Hardcoded Parameters)")
         report.append(f"Test date: {time.strftime('%Y-%m-%d %H:%M:%S')}")
         report.append("")
         
@@ -430,8 +433,8 @@ def main():
     print("ROBOT KINEMATICS REAL DATA VALIDATION")
     print("=" * 60)
     
-    # Initialize validator
-    validator = RealDataValidator("rb3_730es_u.urdf", "third_20250710_162459.json")
+    # Initialize validator without the urdf_path
+    validator = RealDataValidator("third_20250710_162459.json")
     
     # Run validation tests
     print("Starting comprehensive validation...")
@@ -455,4 +458,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

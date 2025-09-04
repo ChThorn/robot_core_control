@@ -17,9 +17,8 @@ logger = logging.getLogger('robot_main')
 def main():
     """Main application entry point."""
     try:
-        # Initialize robot controller
+        # Initialize robot controller without the URDF path
         controller = RobotController(
-            urdf_path="rb3_730es_u.urdf",
             ee_link="tcp",
             base_link="link0"
         )
@@ -30,7 +29,6 @@ def main():
         logger.info("=== Testing Forward and Inverse Kinematics ===")
         
         # Test configuration (radians)
-        # q_test = np.array([0.5, 0.1, 0.2, 0.8, -0.4, 0.6])
         q_test = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         
         # Compute forward kinematics
@@ -83,12 +81,12 @@ def main():
                       f"({np.rad2deg(validation_results['max_rotation_error']):.2f} deg)")
                 
                 # Assessment
-                if validation_results['mean_position_error'] < 0.005:  # 5mm
+                if validation_results['mean_position_error'] < 0.005:
                     logger.info("✅ Position accuracy is excellent")
                 else:
                     logger.warning("⚠️  Position accuracy may need improvement")
                 
-                if validation_results['mean_rotation_error'] < 0.1:  # ~5.7 degrees
+                if validation_results['mean_rotation_error'] < 0.1:
                     logger.info("✅ Rotation accuracy is excellent")
                 else:
                     logger.warning("⚠️  Rotation accuracy may need improvement")
@@ -116,4 +114,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
