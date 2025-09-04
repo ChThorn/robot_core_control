@@ -1,11 +1,13 @@
 # Configuration for workspace boundaries and obstacles
+# FIXED: Updated workspace bounds to match actual robot reachability
 workspace:
-  x_min: -1500
-  x_max: 1500
-  y_min: -1500
-  y_max: 1500
-  z_min: -5
-  z_max: 1000
+  x_min: -800   # -0.8m in mm
+  x_max: 800    # +0.8m in mm  
+  y_min: -800   # -0.8m in mm
+  y_max: 800    # +0.8m in mm
+  z_min: -600   # -0.6m in mm (FIXED: was -5, now allows negative Z)
+  z_max: 1200   # +1.2m in mm
+  
 obstacles:
   - name: "box1"
     type: "box"
@@ -16,6 +18,7 @@ obstacles:
     center: [-200, 0, 300]
     radius: 50
     height: 200
+    
 orientation_limits:
   roll_min: -180
   roll_max: 180

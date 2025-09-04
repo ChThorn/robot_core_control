@@ -43,7 +43,7 @@ class RobotKinematics:
     def _get_hardcoded_parameters(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Provides the hardcoded kinematic parameters for the RB3-730ES-U robot.
-        These values are derived from the 'rb3_730es_u.urdf' file.
+        FIXED: Corrected sign errors in joints 4 and 6.
         """
         # Screw axes (S) for the 6 joints, in the base frame.
         # Each column is a screw axis [w_x, w_y, w_z, v_x, v_y, v_z].T
@@ -52,7 +52,7 @@ class RobotKinematics:
             [0.,     0.,      0.,       0.,       0.,       0.      ],  # ω_x
             [0.,     1.,      1.,       0.,       1.,       0.      ],  # ω_y
             [1.,     0.,      0.,       1.,       0.,       1.      ],  # ω_z
-            [0.,    -0.1453, -0.4313,   0.00645, -0.7753,   0.00645 ],  # v_x
+            [0.,    -0.1453, -0.4313,  -0.00645, -0.7753,  -0.00645 ],  # v_x (FIXED signs)
             [0.,     0.,      0.,       0.,       0.,       0.      ],  # v_y
             [0.,     0.,      0.,       0.,       0.,       0.      ]   # v_z
         ])
