@@ -1,0 +1,30 @@
+# test_configs.yaml
+
+joint_space_tests:
+  - name: "Home to Simple"
+    start_config: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    goal_config: [0.2, 0.15, -0.1, 0.0, 0.05, 0.0]
+  - name: "Small Joint Movement"
+    start_config: [0.1, 0.1, -0.1, 0.0, 0.05, 0.0]
+    goal_config: [-0.1, 0.1, 0.1, 0.0, -0.05, 0.1]
+  - name: "Obstacle Avoidance"
+    start_config: [0.15, -0.1, 0.05, 0.0, 0.0, 0.0]
+    goal_config: [-0.1, 0.15, 0.1, 0.0, 0.0, 0.0]
+  - name: "Workspace Boundary"
+    start_config: [0.05, 0.05, 0.05, 0.0, 0.0, 0.0]
+    goal_config: [-0.2, 0.2, 0.15, 0.0, 0.0, 0.0]
+
+cartesian_space_tests:
+  - name: "Case 1"
+    start_pose: [0.4, 0.0, 0.6, 0.0, 0.0, 0.0] # [x, y, z, rx, ry, rz]
+    goal_pose: [0.3, 0.3, 0.5, 0.0, 0.0, 0.5]
+  - name: "Case 2"
+    start_pose: [0.2, -0.2, 0.4, 0.0, 0.0, 0.0]
+    goal_pose: [-0.2, 0.2, 0.6, 0.0, 0.0, 0.0]
+
+demonstration_scenario:
+  pick_pose: [0.3, 0.2, 0.5, 0.0, 1.57079632679, 0.0] # pi/2 for ry
+  intermediate_pose: [0.0, 0.4, 0.7, 0.0, 1.57079632679, 0.0]
+  place_pose: [-0.3, -0.2, 0.4, 0.0, 1.57079632679, 0.0]
+
+

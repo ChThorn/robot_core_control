@@ -2,6 +2,9 @@ __pycache__/
 *.npy
 *.json
 *.txt
-*.png
 recorded_paths/
 *.urdf
+
+# But keep this tracked
+!Path_1751586417_20250704_084744.json
+!third_20250710_162459.json

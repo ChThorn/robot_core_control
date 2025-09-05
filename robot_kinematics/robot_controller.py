@@ -223,7 +223,19 @@ class RobotController:
             self.performance_stats['avg_ik_time'] = (
                 (self.performance_stats['avg_ik_time'] * (total_calls - 1) + computation_time) / total_calls
             )
-            
+
+            # If still not converged, try pose perturbation as a fallback
+            if not best_converged and best_q is not None:
+                logger.info("IK did not converge, attempting fallback with pose perturbation.")
+                pos_err, rot_err = self.robot.check_pose_error(T_des, best_q)
+                
+                # Only try perturbation if we are somewhat close
+                if pos_err < 0.05 and rot_err < 0.2: # 5cm and ~11.5 deg
+                    perturbed_q, converged = self._ik_with_perturbation(T_des, best_q)
+                    if converged:
+                        logger.info("IK fallback with perturbation succeeded.")
+                        return perturbed_q, True
+
             return best_q, best_converged
             
         except Exception as e:
@@ -329,7 +341,48 @@ class RobotController:
         except Exception as e:
             logger.error(f"Failed to send command to robot: {e}")
             return False
-    
+
+    def _ik_with_perturbation(self, T_des: np.ndarray, q_init: np.ndarray) -> Tuple[Optional[np.ndarray], bool]:
+        """IK fallback that perturbs the target pose slightly to find a solution."""
+        pos_relax_abs = self.ik_params.get('position_relaxation', 0.01) # 1 cm
+        rot_relax_abs = self.ik_params.get('rotation_relaxation', 0.05) # ~2.8 deg
+
+        for i in range(15): # 15 perturbation attempts
+            # Create a small random perturbation
+            pos_offset = np.random.uniform(-pos_relax_abs, pos_relax_abs, 3)
+            
+            # Create a small random rotation vector and convert to matrix
+            rot_vec = np.random.uniform(-rot_relax_abs, rot_relax_abs, 3)
+            angle = np.linalg.norm(rot_vec)
+            if angle > 1e-6:
+                axis = rot_vec / angle
+                # Rodrigues' rotation formula
+                K = np.array([[0, -axis[2], axis[1]], [axis[2], 0, -axis[0]], [-axis[1], axis[0], 0]])
+                R_offset = np.eye(3) + np.sin(angle) * K + (1 - np.cos(angle)) * (K @ K)
+            else:
+                R_offset = np.eye(3)
+
+            # Apply perturbation
+            T_perturbed = T_des.copy()
+            T_perturbed[:3, 3] += pos_offset
+            T_perturbed[:3, :3] = T_perturbed[:3, :3] @ R_offset
+
+            # Attempt IK with the perturbed target
+            q_sol, converged = self.robot._ik_dls(
+                T_perturbed, q_init, **{k: v for k, v in self.ik_params.items() if k not in ['num_attempts', 'position_relaxation', 'rotation_relaxation']}
+            )
+
+            if converged:
+                # Check if the solution for the perturbed pose is acceptable for the *original* pose
+                final_pos_err, final_rot_err = self.robot.check_pose_error(T_des, q_sol)
+                
+                # Use slightly more generous tolerances for accepting a perturbed solution
+                if final_pos_err < self.ik_params['pos_tol'] * 2.5 and final_rot_err < self.ik_params['rot_tol'] * 2.5:
+                    logger.info(f"Perturbation attempt {i+1} found an acceptable solution.")
+                    return q_sol, True
+        
+        return None, False
+
     def get_performance_stats(self) -> Dict[str, Any]:
         """Get performance statistics."""
         stats = self.performance_stats.copy()
